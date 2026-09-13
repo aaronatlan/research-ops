@@ -16,12 +16,13 @@ import argparse
 import json
 import re
 import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
 TOPICS_FILE = Path(__file__).resolve().parent.parent / "data" / "topics.md"
@@ -34,10 +35,12 @@ def load_categories(topics_path: Path) -> list[str]:
     return [line.strip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
 
 
-def fetch(categories: list[str], max_results: int) -> list[dict]:
-    cat_query = "+OR+".join(f"cat:{c}" for c in categories)
+def fetch_one_category(category: str, max_results: int) -> list[dict]:
+    # arXiv's API intermittently 429s/times out on multi-category "OR" queries
+    # (observed consistently even for a single "+OR+"), but per-category
+    # queries succeed reliably. Fetch each category separately and merge.
     url = (
-        f"{ARXIV_API}?search_query={cat_query}"
+        f"{ARXIV_API}?search_query=cat:{category}"
         f"&sortBy=submittedDate&sortOrder=descending&max_results={max_results}"
     )
     with urllib.request.urlopen(url, timeout=30) as resp:
@@ -71,6 +74,21 @@ def fetch(categories: list[str], max_results: int) -> list[dict]:
                 "categories": cats,
             }
         )
+    return papers
+
+
+def fetch(categories: list[str], max_results: int) -> list[dict]:
+    seen_links = set()
+    papers = []
+    for i, category in enumerate(categories):
+        if i > 0:
+            time.sleep(3)  # be polite to arXiv's API between requests
+        for p in fetch_one_category(category, max_results):
+            if p["link"] in seen_links:
+                continue
+            seen_links.add(p["link"])
+            papers.append(p)
+    papers.sort(key=lambda p: p["published"], reverse=True)
     return papers
 
 
