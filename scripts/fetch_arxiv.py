@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -35,16 +36,29 @@ def load_categories(topics_path: Path) -> list[str]:
     return [line.strip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
 
 
-def fetch_one_category(category: str, max_results: int) -> list[dict]:
+def fetch_one_category(category: str, max_results: int, retries: int = 4) -> list[dict]:
     # arXiv's API intermittently 429s/times out on multi-category "OR" queries
     # (observed consistently even for a single "+OR+"), but per-category
     # queries succeed reliably. Fetch each category separately and merge.
+    # It also flakes intermittently even per-category (shared egress IP), so
+    # retry with backoff before giving up.
     url = (
         f"{ARXIV_API}?search_query=cat:{category}"
         f"&sortBy=submittedDate&sortOrder=descending&max_results={max_results}"
     )
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        raw = resp.read()
+    raw = None
+    last_err = None
+    for attempt in range(retries):
+        if attempt > 0:
+            time.sleep(5 * attempt)
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                raw = resp.read()
+            break
+        except (urllib.error.HTTPError, TimeoutError, OSError) as e:
+            last_err = e
+    if raw is None:
+        raise last_err
 
     root = ET.fromstring(raw)
     papers = []
