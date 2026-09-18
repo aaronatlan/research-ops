@@ -15,8 +15,8 @@ sémantique, juste une récupération brute par catégorie.
 import argparse
 import json
 import re
+import subprocess
 import sys
-import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,9 +40,15 @@ def fetch(categories: list[str], max_results: int) -> list[dict]:
         f"{ARXIV_API}?search_query={cat_query}"
         f"&sortBy=submittedDate&sortOrder=descending&max_results={max_results}"
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "research-ops/1.0 (arxiv fetch script)"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read()
+    # arXiv's frontend returns 406 to Python's urllib (likely TLS/HTTP2
+    # fingerprinting), so shell out to curl instead — no extra dependency,
+    # curl is a standard system tool.
+    result = subprocess.run(
+        ["curl", "-sS", "--fail", "--max-time", "30", url],
+        capture_output=True,
+        check=True,
+    )
+    raw = result.stdout
 
     root = ET.fromstring(raw)
     papers = []
