@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
 TOPICS_FILE = Path(__file__).resolve().parent.parent / "data" / "topics.md"
@@ -40,7 +40,8 @@ def fetch(categories: list[str], max_results: int) -> list[dict]:
         f"{ARXIV_API}?search_query={cat_query}"
         f"&sortBy=submittedDate&sortOrder=descending&max_results={max_results}"
     )
-    with urllib.request.urlopen(url, timeout=30) as resp:
+    req = urllib.request.Request(url, headers={"User-Agent": "research-ops/1.0 (arxiv fetch script)"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read()
 
     root = ET.fromstring(raw)
